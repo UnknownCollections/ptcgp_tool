@@ -1,6 +1,6 @@
-use crate::binary::arm64::{parse_mov, parse_movk, LSL_16, LSL_32, LSL_48, X1};
+use crate::binary::arm64::{parse_movk, parse_movz, Register, ShiftAmount};
 use crate::binary::elf::{Elf, POINTER_SIZE};
-use crate::binary::hex_pattern::{find_hex_pattern, HexPattern};
+use crate::binary::hex_pattern::HexPattern;
 use crate::unity::generated::CIl2Cpp::{
     Il2CppCodeGenModule, Il2CppCodeRegistration, Il2CppMetadataRegistration, Il2CppType,
     Il2CppTypeEnum, IL2CPP_TYPE_ENUM,
@@ -121,32 +121,32 @@ impl<'a> Il2Cpp<'a> {
         // Look for five consecutive instructions that meet the required criteria.
         for window in instructions.windows(5) {
             debug!(progress_tick = 1; "");
-            let inst1 = match parse_mov(window[0]) {
+            let inst1 = match parse_movz(window[0]) {
                 Some(inst) => inst,
                 None => continue,
             };
-            if inst1.rd != X1 {
+            if inst1.rd != Register::X1 {
                 continue;
             }
             let inst2 = match parse_movk(window[2]) {
                 Some(inst) => inst,
                 None => continue,
             };
-            if inst2.rd != X1 || inst2.hw != LSL_16 {
+            if inst2.rd != Register::X1 || inst2.hw != ShiftAmount::Lsl16 {
                 continue;
             }
             let inst3 = match parse_movk(window[3]) {
                 Some(inst) => inst,
                 None => continue,
             };
-            if inst3.rd != X1 || inst3.hw != LSL_32 {
+            if inst3.rd != Register::X1 || inst3.hw != ShiftAmount::Lsl32 {
                 continue;
             }
             let inst4 = match parse_movk(window[4]) {
                 Some(inst) => inst,
                 None => continue,
             };
-            if inst4.rd != X1 || inst4.hw != LSL_48 {
+            if inst4.rd != Register::X1 || inst4.hw != ShiftAmount::Lsl48 {
                 continue;
             }
             let combined = ((inst4.imm16 as u64) << 48)
@@ -176,7 +176,7 @@ impl<'a> Il2Cpp<'a> {
         const KEY_XOR_PATTERN: HexPattern = HexPattern::new(
             "FF FF FF FF ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? 02 00 00 00 00 00 00 00 FF FF FF FF FF FF FF FF",
         );
-        if let Some(idx) = find_hex_pattern(data, KEY_XOR_PATTERN.pattern(), KEY_XOR_PATTERN.mask())
+        if let Some(idx) = KEY_XOR_PATTERN.find(data)
         {
             data[idx + 4..idx + 4 + 16].try_into().ok()
         } else {

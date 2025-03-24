@@ -3,11 +3,11 @@ use anyhow::{anyhow, bail, Result};
 use goblin::elf32::program_header::{PF_W, PF_X, PT_LOAD};
 use goblin::elf64::reloc;
 use hashbrown::HashMap;
+use log::debug;
 use nohash_hasher::IntMap;
 use std::hash::Hasher;
 use std::mem::{size_of, transmute};
 use std::ops::Range;
-use log::debug;
 
 // Map relocation addends to a vector of target virtual addresses.
 type RelocMap = IntMap<i64, Vec<u64>>;
@@ -40,7 +40,7 @@ impl<'a> Elf<'a> {
     /// - Transmutes the lifetime of the parsed ELF for internal use.
     pub fn new(data: Vec<u8>) -> Result<Elf<'a>> {
         debug!("Loading IL2CPP as ELF64...");
-        
+
         let original_data = data;
         let elf = goblin::elf::Elf::parse(&original_data)?;
 
@@ -52,7 +52,7 @@ impl<'a> Elf<'a> {
         let (data, relocations) = Self::apply_dynamic_relocations(&elf, original_data.clone())?;
 
         // Build a mapping from section names to their file offsets.
-        debug!("Building ELF section mapping...");       
+        debug!("Building ELF section mapping...");
         let sections = Self::get_section_slices(&elf);
 
         // SAFETY: We transmute the lifetime of 'elf' to '`a'
@@ -341,7 +341,7 @@ impl<'a> Elf<'a> {
             if section_names.contains(&name.as_str()) {
                 let data = &self.data[range.start..range.end];
                 for result in find_pattern(data, needle) {
-                    results.push((name.to_string(), result));
+                    results.push((name.to_string(), range.start + result));
                 }
             }
         }

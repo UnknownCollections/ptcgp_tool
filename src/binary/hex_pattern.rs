@@ -103,40 +103,30 @@ impl HexPattern {
         }
     }
 
-    /// Returns the slice of bytes in the parsed pattern.
-    pub fn pattern(&self) -> &[u8] {
-        &self.pattern[..self.count]
-    }
-
-    /// Returns the slice of booleans (mask) in the parsed pattern.
-    pub fn mask(&self) -> &[bool] {
-        &self.mask[..self.count]
-    }
-}
-
-/// Searches `data` for the first occurrence of the pattern (using `mask` to ignore wildcards)
-pub fn find_hex_pattern(data: &[u8], pattern: &[u8], mask: &[bool]) -> Option<usize> {
-    debug_assert_eq!(pattern.len(), mask.len());
-    if pattern.is_empty() {
-        return Some(0);
-    }
-    // Total iterations needed (the last valid index).
-    let total = data.len().saturating_sub(pattern.len());
-    debug!(progress = 0, max = total; "");
-    for i in 0..=total {
-        debug!(progress_tick = 1; "");
-        // For each possible starting offset, check every byte in the pattern.
-        let mut found = true;
-        for j in 0..pattern.len() {
-            // If mask[j] is true we require an exact match.
-            if mask[j] && data[i + j] != pattern[j] {
-                found = false;
-                break;
+    /// Searches `data` for the first occurrence of the pattern (using `mask` to ignore wildcards)
+    pub fn find(&self, data: &[u8]) -> Option<usize> {
+        debug_assert_eq!(self.pattern.len(), self.mask.len());
+        if self.pattern.is_empty() {
+            return Some(0);
+        }
+        // Total iterations needed (the last valid index).
+        let total = data.len().saturating_sub(self.pattern.len());
+        debug!(progress = 0, max = total; "");
+        for i in 0..=total {
+            debug!(progress_tick = 1; "");
+            // For each possible starting offset, check every byte in the pattern.
+            let mut found = true;
+            for j in 0..self.pattern.len() {
+                // If mask[j] is true we require an exact match.
+                if self.mask[j] && data[i + j] != self.pattern[j] {
+                    found = false;
+                    break;
+                }
+            }
+            if found {
+                return Some(i);
             }
         }
-        if found {
-            return Some(i);
-        }
+        None
     }
-    None
 }

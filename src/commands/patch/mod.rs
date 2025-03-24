@@ -1,5 +1,6 @@
 use crate::archive::open_archive;
 use crate::binary::elf::Elf;
+use crate::commands::patch::hash_constants::{find_function_hash_constants, find_segment_hash};
 use crate::commands::patch::section_hashes::update_section_hash;
 use crate::commands::tui::commands::IntoTui;
 use crate::commands::tui::utils::{
@@ -24,6 +25,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 mod function_hashes;
+mod hash_constants;
 mod section_hashes;
 
 /// Arguments required for patching the IL2CPP file.
@@ -216,7 +218,7 @@ impl IntoTui for PatchArgs {
 /// - An error if any of the steps fail.
 pub fn execute(args: PatchArgs) -> Result<()> {
     info!("Running il2cpp patch command...");
-    info!(progress = 0, max = 6; "");
+    info!(progress = 0, max = 8; "");
 
     info!("Loading input data...");
     let (il2cpp_data, global_metadata_data, modified_il2cpp_data) = get_input_data(&args)?;
@@ -230,12 +232,20 @@ pub fn execute(args: PatchArgs) -> Result<()> {
     let mut modified_il2cpp = Elf::new(modified_il2cpp_data)?;
     info!(progress_tick = 1; "");
 
+    info!("Finding hash constants...");
+    let hash_constants = find_function_hash_constants(&il2cpp)?;
+    info!(progress_tick = 1; "");
+
+    info!("Finding segment hash constant...");
+    let segment_hash_constant = find_segment_hash(&il2cpp)?;
+    info!(progress_tick = 1; "");
+
     info!("Updating function hashes...");
-    update_fn_hashes(&il2cpp, &mut modified_il2cpp)?;
+    update_fn_hashes(&il2cpp, &mut modified_il2cpp, &hash_constants)?;
     info!(progress_tick = 1; "");
 
     info!("Updating section hash...");
-    update_section_hash(&il2cpp, &mut modified_il2cpp, vec![".text", "il2cpp"])?;
+    update_section_hash(&il2cpp, &mut modified_il2cpp, vec![".text", "il2cpp"], segment_hash_constant)?;
     info!(progress_tick = 1; "");
 
     info!("Writing patched il2cpp file...");
@@ -243,6 +253,7 @@ pub fn execute(args: PatchArgs) -> Result<()> {
     fs::write(args.modified, modified_data)?;
     info!(progress_tick = 1; "");
 
+    info!("Done!");
     Ok(())
 }
 

@@ -2,6 +2,7 @@ use crate::binary::elf::Elf;
 use crate::hash::il2cpp_code_hasher::Il2CppPocketCodeHasher;
 use crate::unity::il2cpp::Il2Cpp;
 use anyhow::{bail, Result};
+use log::debug;
 use std::hash::Hasher;
 
 /// Computes the hash for specified sections of an ELF binary using a custom SHA-1 based hasher.
@@ -51,12 +52,15 @@ pub fn update_section_hash(
 ) -> Result<()> {
     // Compute the hash from the original file's segments.
     let original_hash = hash_elf(&il2cpp.elf, &segments)?;
+    debug!("Original section hash: {:#X}", original_hash);
 
     // Compute the hash from the modified file's segments.
     let new_hash = hash_elf(modified_il2cpp, &segments)?;
+    debug!("Modified section hash: {:#X}", original_hash);
 
     // If the hashes match, no update is necessary.
     if original_hash == new_hash {
+        debug!("Hashes match, no update necessary");
         return Ok(());
     }
 
@@ -75,6 +79,7 @@ pub fn update_section_hash(
         bail!("Too many matches for original hash");
     }
     let (_, found_hash_offset) = found[0];
+    debug!("Found original hash at offset: {:#X}", found_hash_offset);
 
     let modified_hash = hash_elf(modified_il2cpp, &segments)?;
 
@@ -85,12 +90,14 @@ pub fn update_section_hash(
     );
 
     if modified_file_coded_hash == modified_hash {
+        debug!("Modified IL2CPP file has already been patched...");
         return Ok(());
     }
 
     // Replace the located original hash with the new hash bytes.
     modified_il2cpp.original_data[found_hash_offset..found_hash_offset + original_hash_bytes.len()]
         .copy_from_slice(&new_hash_bytes);
+    debug!("Patched section hash to: {:#X}", modified_hash);
 
     Ok(())
 }

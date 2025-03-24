@@ -1,3 +1,5 @@
+use log::debug;
+
 /// Converts a single hex digit (as a byte) to its value.
 const fn parse_hex_digit(b: u8) -> u8 {
     match b {
@@ -114,11 +116,15 @@ impl HexPattern {
 
 /// Searches `data` for the first occurrence of the pattern (using `mask` to ignore wildcards)
 pub fn find_hex_pattern(data: &[u8], pattern: &[u8], mask: &[bool]) -> Option<usize> {
-    assert_eq!(pattern.len(), mask.len());
+    debug_assert_eq!(pattern.len(), mask.len());
     if pattern.is_empty() {
         return Some(0);
     }
-    for i in 0..=data.len().saturating_sub(pattern.len()) {
+    // Total iterations needed (the last valid index).
+    let total = data.len().saturating_sub(pattern.len());
+    debug!(progress = 0, max = total; "");
+    for i in 0..=total {
+        debug!(progress_tick = 1; "");
         // For each possible starting offset, check every byte in the pattern.
         let mut found = true;
         for j in 0..pattern.len() {

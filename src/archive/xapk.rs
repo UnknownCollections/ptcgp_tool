@@ -1,3 +1,4 @@
+use crate::archive::AndroidArchive;
 use anyhow::{anyhow, Result};
 use hashbrown::HashMap;
 use serde::Deserialize;
@@ -159,5 +160,26 @@ impl XApkFile {
         let mut file_contents = Vec::new();
         file_entry.read_to_end(&mut file_contents)?;
         Ok(file_contents)
+    }
+}
+
+/// Implements the AndroidArchive trait for ApkFile.
+///
+/// This allows an ApkFile to be used wherever an AndroidArchive is expected.
+impl AndroidArchive for XApkFile {
+    /// Reads an internal file from the APK archive.
+    ///
+    /// Delegates to the `read_internal_file` method of `ApkFile`.
+    ///
+    /// # Arguments
+    ///
+    /// * `internal_path` - The path of the file within the APK.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Vec<u8>)` containing the file's contents on success.
+    /// * `Err` if an error occurs while reading the file.
+    fn read_internal_file(&mut self, internal_path: &str) -> Result<Vec<u8>> {
+        XApkFile::read_internal_file(self, internal_path)
     }
 }

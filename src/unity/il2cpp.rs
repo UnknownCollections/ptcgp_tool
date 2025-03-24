@@ -10,6 +10,7 @@ use crate::utils::read_only::ReadOnly;
 use anyhow::{anyhow, bail, Result};
 use hashbrown::HashMap;
 use itertools::Itertools;
+use log::debug;
 use nohash_hasher::IntMap;
 use std::io::Cursor;
 use std::mem::{offset_of, size_of};
@@ -48,6 +49,7 @@ impl<'a> Il2Cpp<'a> {
     ///
     /// Returns an error if the metadata version is unsupported or if parsing fails.
     pub fn load_from_vec(il2cpp_data: Vec<u8>, global_metadata_data: Vec<u8>) -> Result<Self> {
+        debug!("Loading IL2CPP from ELF and metadata...");
         let reader = Cursor::new(global_metadata_data);
         let metadata = Metadata::load_from_reader(reader)?;
 
@@ -60,6 +62,7 @@ impl<'a> Il2Cpp<'a> {
         let code_registration = Self::find_code_registration(&elf, &metadata)?;
         let metadata_registration = Self::find_metadata_registration(&elf, &metadata)?;
 
+        debug!("Loading types from metadata registration...");
         let types = Self::inner_load_data_array::<Il2CppType>(
             &elf,
             metadata_registration.types,
@@ -69,6 +72,7 @@ impl<'a> Il2Cpp<'a> {
         .map(ReadOnly::new)
         .collect_vec();
 
+        debug!("Loading type pointer map...");
         let type_ptr_map = elf
             .read_pointer_array(
                 metadata_registration.types as u64,
@@ -103,14 +107,20 @@ impl<'a> Il2Cpp<'a> {
     ///
     /// Returns `Some(u64)` containing the metadata key if the pattern is found, or `None` otherwise.
     pub fn extract_metadata_key_xor(data: &[u8]) -> Option<u64> {
+        debug!("Extracting global metadata key xor data from IL2CPP...");
+
         // ARM64 instructions are 4 bytes in little-endian order.
         let instructions: Vec<u32> = data
             .chunks_exact(4)
             .map(|chunk| u32::from_le_bytes(chunk.try_into().unwrap()))
             .collect();
 
+        let total = instructions.len().saturating_sub(5);
+        debug!(progress = 0, max = total; "");
+
         // Look for five consecutive instructions that meet the required criteria.
         for window in instructions.windows(5) {
+            debug!(progress_tick = 1; "");
             let inst1 = match parse_mov(window[0]) {
                 Some(inst) => inst,
                 None => continue,
@@ -162,6 +172,7 @@ impl<'a> Il2Cpp<'a> {
     ///
     /// Returns `Some([u8; 16])` if the key is found, or `None` otherwise.
     pub fn extract_metadata_key(data: &[u8]) -> Option<[u8; 16]> {
+        debug!("Extracting global metadata encryption keys from IL2CPP...");
         const KEY_XOR_PATTERN: HexPattern = HexPattern::new(
             "FF FF FF FF ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? 02 00 00 00 00 00 00 00 FF FF FF FF FF FF FF FF",
         );
@@ -196,6 +207,7 @@ impl<'a> Il2Cpp<'a> {
         elf: &Elf,
         metadata: &Metadata,
     ) -> Result<ReadOnly<Il2CppCodeRegistration>> {
+        debug!("Finding Il2CppCodeRegistration...");
         // 1) Find file offsets of "mscorlib.dll\0" within the ELF data.
         const PATTERN: &[u8; 13] = b"mscorlib.dll\0";
         let mscorlib_file_offsets = elf.search_elf(PATTERN);
@@ -276,6 +288,7 @@ impl<'a> Il2Cpp<'a> {
             if let Some(bytes) = elf.read_bytes_at_va(struct_start_va, CODE_REGISTRATION_SIZE) {
                 let code_reg = unsafe { *(bytes.as_ptr() as *const Il2CppCodeRegistration) };
                 if code_reg.codeGenModulesCount == total_image_count {
+                    debug!("Found Il2CppCodeRegistration at 0x{:x}", candidate_va);
                     return Ok(ReadOnly::new(code_reg));
                 }
             }
@@ -301,6 +314,7 @@ impl<'a> Il2Cpp<'a> {
         elf: &Elf,
         metadata: &Metadata,
     ) -> Result<ReadOnly<Il2CppMetadataRegistration>> {
+        debug!("Finding Il2CppMetadataRegistration...");
         let pattern = (metadata.type_definitions.len() as u64)
             .to_le_bytes()
             .to_vec();
@@ -358,6 +372,11 @@ impl<'a> Il2Cpp<'a> {
                     {
                         continue;
                     }
+
+                    debug!(
+                        "Found Il2CppMetadataRegistration at 0x{:x}",
+                        metadata_reg as *const _ as u64
+                    );
                     return Ok(ReadOnly::new(*metadata_reg));
                 }
                 Err(anyhow!("Could not find a valid Il2CppMetadataRegistration"))

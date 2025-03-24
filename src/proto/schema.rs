@@ -17,6 +17,17 @@ pub struct ProtoGenSchema {
     pub services: Vec<ProtoGenFile>,
 }
 
+impl ProtoGenSchema {
+    /// Returns the total number of enum, message, and service definitions contained in the schema.
+    ///
+    /// # Returns
+    ///
+    /// A `usize` representing the sum of enum, message, and service counts.
+    pub fn count(&self) -> usize {
+        self.enums.len() + self.messages.len() + self.services.len()
+    }
+}
+
 /// Represents the schema for protocol buffer definitions.
 ///
 /// Manages packages and builds a mapping from type indices to output filenames.

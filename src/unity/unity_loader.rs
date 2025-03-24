@@ -6,6 +6,7 @@ use foldhash::fast::FixedState;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use std::hash::{BuildHasher, Hasher};
+use log::debug;
 
 type EncryptionKey = [u8; 16];
 type EncryptionKeyXor = u64;
@@ -56,6 +57,7 @@ pub fn load_encrypted_il2cpp<'a>(
                 .ok_or_else(|| anyhow!("Could not extract global metadata encryption key"))?;
             let key_xor = Il2Cpp::extract_metadata_key_xor(&il2cpp_data)
                 .ok_or_else(|| anyhow!("Could not extract global metadata key xor data"))?;
+
             let new_keys = (key, key_xor);
 
             // Re-acquire the lock and double-check if the keys were added meanwhile.
@@ -69,9 +71,12 @@ pub fn load_encrypted_il2cpp<'a>(
         }
     };
 
-    // Decrypt the global metadata using the extracted keys.
+    debug!("Metadata key: {:X?}", metadata_key);
+    debug!("Metadata key xor: {:X}", metadata_key_xor);
+
+    debug!("Decrypting global metadata...");
     let decrypted_global_metadata =
-        global_metadata::decrypt_data(&global_metadata_data, metadata_key, metadata_key_xor);
+        global_metadata::decrypt(&global_metadata_data, metadata_key, metadata_key_xor);
 
     // Load and return the IL2CPP binary along with its decrypted metadata.
     Il2Cpp::load_from_vec(il2cpp_data, decrypted_global_metadata)

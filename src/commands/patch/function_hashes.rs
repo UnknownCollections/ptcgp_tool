@@ -1,12 +1,12 @@
 use crate::binary::elf::{Elf, POINTER_SIZE};
 use crate::hash::il2cpp_code_hasher::{Il2CppPocketCodeHasher, Il2CppXorCodeHasher};
 use crate::unity::il2cpp::Il2Cpp;
+use anyhow::Result;
 use hashbrown::HashMap;
+use log::debug;
 use parking_lot::Mutex;
 use rayon::prelude::*;
-use anyhow::Result;
 use std::fmt::{Display, Formatter};
-use std::mem::size_of;
 
 /// Represents a raw protected method entry in the binary.
 ///
@@ -65,8 +65,8 @@ impl Display for ProtectedMethodInfo {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{:#X} {}: {} ({} bytes) = {:#X}",
-            self.addr, self.hash_type, self.name, self.size, self.hash,
+            "{:#X} {}: {} ({} bytes) = {:#X} @ {:#X}",
+            self.addr, self.hash_type, self.name, self.size, self.hash, self.metadata_addr
         )
     }
 }
@@ -89,9 +89,10 @@ const MAX_CODE_SIZE: u64 = 1 << 20;
 /// # Returns
 ///
 /// A result containing a vector of `ProtectedMethodInfo` if successful, or an error.
-pub fn find_protected_fns<'a>(
-    il2cpp: &'a Il2Cpp<'a>,
-) -> Result<Vec<ProtectedMethodInfo>> {
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+
+pub fn find_protected_fns<'a>(il2cpp: &'a Il2Cpp<'a>) -> Result<Vec<ProtectedMethodInfo>> {
     // Retrieve the .data section range and slice from the ELF.
     let data_section_range = il2cpp.elf.sections.get(".data").unwrap();
     let data_section = &il2cpp.elf.data[data_section_range.start..data_section_range.end];
@@ -114,25 +115,36 @@ pub fn find_protected_fns<'a>(
     let num_threads = rayon::current_num_threads();
     let chunk_size = total_size / num_threads.min(2);
 
+    // Compute total iterations for progress reporting.
+    // We slide one byte at a time, and each valid start position is an iteration.
+    let total_iterations = data_section.len().saturating_sub(POINTER_SIZE) + 1;
+    let processed_iterations = AtomicUsize::new(0);
+
+    // Log the start of processing.
+    debug!(progress = 0, max = total_iterations; "");
+
     // Process the .data section in parallel by dividing it into chunks.
     data_section
         .par_chunks(chunk_size)
         .enumerate()
         .for_each(|(chunk_index, chunk_data)| {
-            // Compute the starting offset for the current chunk.
+            // Calculate the global start offset for this chunk.
             let chunk_start = chunk_index * chunk_size;
             let mut local_hits = Vec::new();
 
-            // Slide over the chunk, ensuring there are enough bytes for a ProtectedMethodMetadata.
-            for i in 0..(chunk_data.len().saturating_sub(POINTER_SIZE) + 1) {
+            // Number of sliding-window iterations in this chunk.
+            let num_iterations = chunk_data.len().saturating_sub(POINTER_SIZE) + 1;
+            for i in 0..num_iterations {
                 let chunk_offset = chunk_start + i;
                 let addr_bytes = &chunk_data[i..i + POINTER_SIZE];
                 let addr = u64::from_le_bytes(addr_bytes.try_into().unwrap());
 
-                // Validate that the pointer is within the ELF's valid range.
+                // Validate pointer.
                 if il2cpp.elf.is_valid_pointer(addr) {
-                    // Ensure there is enough room to read a complete ProtectedMethodMetadata structure.
-                    if chunk_offset + size_of::<ProtectedMethodMetadata>() <= data_section_len {
+                    // Ensure there is room to read a complete ProtectedMethodMetadata.
+                    if chunk_offset + std::mem::size_of::<ProtectedMethodMetadata>()
+                        <= data_section_len
+                    {
                         // SAFETY: The pointer arithmetic is bounded by the earlier length check.
                         let pm = unsafe {
                             &*(data_section.as_ptr().add(chunk_offset)
@@ -177,7 +189,7 @@ pub fn find_protected_fns<'a>(
                                             hash_type,
                                             metadata_addr: (data_section_range.start + chunk_offset)
                                                 as u64,
-                                            name: method_name.clone(),
+                                            name: method_name,
                                         });
                                     }
                                 }
@@ -187,7 +199,12 @@ pub fn find_protected_fns<'a>(
                 }
             }
 
-            // Merge the local findings into the shared results vector.
+            // Update the global progress counter with the iterations processed in this chunk.
+            let processed =
+                processed_iterations.fetch_add(num_iterations, Ordering::Relaxed) + num_iterations;
+            debug!(progress = processed; "Processed chunk {}", chunk_index);
+
+            // Merge local findings into the shared results vector.
             results.lock().extend(local_hits);
         });
 
@@ -208,17 +225,16 @@ pub fn find_protected_fns<'a>(
 /// # Returns
 ///
 /// A result indicating success or containing an error if the process fails.
-pub fn update_fn_hashes<'a>(
-    il2cpp: &'a Il2Cpp<'a>,
-    modified_il2cpp: &mut Elf,
-) -> Result<()> {
-    // Retrieve all protected functions from the original binary.
+pub fn update_fn_hashes<'a>(il2cpp: &'a Il2Cpp<'a>, modified_il2cpp: &mut Elf) -> Result<()> {
+    debug!("Scanning original IL2CPP data section for protected method signatures...");
     let protected_fns = find_protected_fns(il2cpp)?;
 
     let mut mismatched_fns = Vec::new();
 
     // Iterate over each protected function and verify its hash in the modified binary.
+    debug!(progress = 0, max = protected_fns.len(); "");
     for protected_fn in &protected_fns {
+        debug!("\t-Found: {}", protected_fn);
         // Convert the virtual address of the method to its file offset in the modified binary.
         if let Some(file_offset) = modified_il2cpp.va_to_file_offset(protected_fn.addr) {
             let file_offset = file_offset as usize;
@@ -241,10 +257,12 @@ pub fn update_fn_hashes<'a>(
                 }
             }
         }
+        debug!(progress_tick = 1; "");
     }
 
     // If mismatches were found, update the modified binary with the new hash values.
     if !mismatched_fns.is_empty() {
+        debug!("Updating hashes:");
         for (info, actual_hash) in mismatched_fns {
             let pm = unsafe {
                 &mut *(modified_il2cpp
@@ -253,11 +271,13 @@ pub fn update_fn_hashes<'a>(
                     .add(info.metadata_addr as usize)
                     as *mut ProtectedMethodMetadata)
             };
-            
+
             if pm.hash == actual_hash {
+                debug!("\t-{}: Already patched", info.name);
                 continue;
             }
-            
+            debug!("\t-{}: {:#X} -> {:#X}", info.name, pm.hash, actual_hash);
+
             pm.hash = actual_hash;
         }
     }

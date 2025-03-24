@@ -1,5 +1,6 @@
 use aes::Aes128;
 use ctr::cipher::{KeyIvInit, StreamCipher};
+use log::debug;
 
 // Define a type alias for AES-128 in CTR mode with a 128-bit big-endian counter.
 type Aes128Ctr = ctr::Ctr128BE<Aes128>;
@@ -35,7 +36,7 @@ type Aes128Ctr = ctr::Ctr128BE<Aes128>;
 ///    in place by applying the keystream.
 ///
 /// Note: This function assumes that the input data is well-formed and will panic if the header or lengths are incorrect.
-pub fn decrypt_data(data: &[u8], key: [u8; 16], key_xor: u64) -> Vec<u8> {
+pub fn decrypt(data: &[u8], key: [u8; 16], key_xor: u64) -> Vec<u8> {
     // Convert the key_xor value to its little-endian byte representation.
     let key_xor_bytes = key_xor.to_le_bytes();
 
@@ -66,6 +67,14 @@ pub fn decrypt_data(data: &[u8], key: [u8; 16], key_xor: u64) -> Vec<u8> {
 
     // Create a mutable copy of the ciphertext and decrypt it in place using the keystream.
     let mut decrypted = ciphertext.to_vec();
-    cipher.apply_keystream(&mut decrypted);
+    let total = decrypted.len();
+    debug!(progress = 0, max = total; "");
+    let chunk_size = 1024;
+
+    // Process the ciphertext in chunks, applying the keystream and reporting progress.
+    for chunk in decrypted.chunks_mut(chunk_size) {
+        cipher.apply_keystream(chunk);
+        debug!(progress_tick = chunk.len(); "");
+    }
     decrypted
 }

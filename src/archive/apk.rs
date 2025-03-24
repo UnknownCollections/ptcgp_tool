@@ -1,8 +1,9 @@
+use crate::archive::AndroidArchive;
+use anyhow::Result;
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::Path;
 use zip::read::ZipArchive;
-use anyhow::Result;
 
 /// Represents an open APK file.
 ///
@@ -42,18 +43,39 @@ impl ApkFile {
     /// * `Ok(Vec<u8>)` containing the file’s contents if the file is found and read successfully.
     /// * `Err` if the file is not found or if an I/O error occurs during the read operation.
     pub fn read_internal_file(&mut self, internal_path: &str) -> Result<Vec<u8>> {
-        // Reset the file cursor to ensure the ZIP archive is read from the beginning.
+        // Reset the file cursor to the start so that the ZIP archive is read from the beginning.
         self.file.seek(SeekFrom::Start(0))?;
 
         // Create a ZIP archive interface to access files within the APK.
         let mut apk_archive = ZipArchive::new(&mut self.file)?;
 
-        // Locate the file within the archive by its name.
+        // Locate the specified file within the archive by its name.
         let mut file_entry = apk_archive.by_name(internal_path)?;
 
         // Read the file's contents into a byte vector.
         let mut file_contents = Vec::new();
         file_entry.read_to_end(&mut file_contents)?;
         Ok(file_contents)
+    }
+}
+
+/// Implements the AndroidArchive trait for ApkFile.
+///
+/// This allows an ApkFile to be used wherever an AndroidArchive is expected.
+impl AndroidArchive for ApkFile {
+    /// Reads an internal file from the APK archive.
+    ///
+    /// Delegates to the `read_internal_file` method of `ApkFile`.
+    ///
+    /// # Arguments
+    ///
+    /// * `internal_path` - The path of the file within the APK.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Vec<u8>)` containing the file's contents on success.
+    /// * `Err` if an error occurs while reading the file.
+    fn read_internal_file(&mut self, internal_path: &str) -> Result<Vec<u8>> {
+        ApkFile::read_internal_file(self, internal_path)
     }
 }

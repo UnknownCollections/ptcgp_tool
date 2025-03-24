@@ -12,6 +12,7 @@ use crate::unity::generated::CIl2Cpp::{Il2CppImageDefinition, Il2CppTypeDefiniti
 use crate::unity::il2cpp::Il2Cpp;
 use anyhow::{anyhow, bail, Result};
 use hashbrown::HashMap;
+use log::debug;
 use phf::phf_map;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -35,6 +36,7 @@ pub fn generate_proto_schema(il2cpp: Il2Cpp) -> Result<ProtoGenSchema> {
     let mut oneof_cases: HashMap<TypeIndex, Vec<ProtoEnum>> = HashMap::new();
 
     // Process each image in the IL2CPP metadata.
+    debug!(progress = 0, max = il2cpp.metadata.images.len(); "");
     for game_image in &il2cpp.metadata.images {
         process_image(
             game_image,
@@ -43,6 +45,7 @@ pub fn generate_proto_schema(il2cpp: Il2Cpp) -> Result<ProtoGenSchema> {
             &mut nested_types_map,
             &mut oneof_cases,
         )?;
+        debug!(progress_tick = 1; "");
     }
 
     // Resolve and merge nested types.
@@ -50,6 +53,7 @@ pub fn generate_proto_schema(il2cpp: Il2Cpp) -> Result<ProtoGenSchema> {
     integrate_nested_types_into_packages(&mut schema, &mut nested_types_map);
 
     schema.seal();
+    debug!("Build generated proto schema...");
     schema.build()
 }
 
@@ -94,12 +98,16 @@ fn process_image<'a>(
     nested_types_map: &mut HashMap<TypeIndex, Vec<ProtoType>>,
     oneof_cases: &mut HashMap<TypeIndex, Vec<ProtoEnum>>,
 ) -> Result<()> {
+    let image_name = il2cpp.metadata.get_string_by_index(game_image.nameIndex);
+    debug!("Processing IL2CPP image: {image_name}");
+
     let type_start = game_image.typeStart as usize;
     let type_end = type_start + game_image.typeCount as usize;
     let type_defs = &il2cpp.metadata.type_definitions[type_start..type_end];
 
     for ty_def in type_defs {
         let namespace = il2cpp.metadata.get_string_by_index(ty_def.namespaceIndex);
+
         let package = schema.get(namespace);
 
         // Determine if this type represents a service, enum, or message.
@@ -135,6 +143,7 @@ fn process_service<'a>(
     let metadata = &il2cpp.metadata;
     let service_name = metadata.get_string_by_index(ty_def.nameIndex);
     let expected_client_name = format!("{}Client", service_name);
+    debug!("Processing GRPC proto service: {service_name}");
 
     // Find the client type definition matching the expected client name.
     let service_client_ty_def = metadata
@@ -269,6 +278,7 @@ fn process_enum<'a>(
     oneof_cases: &mut HashMap<TypeIndex, Vec<ProtoEnum>>,
 ) -> Result<()> {
     let enum_type = parse_enum_type(il2cpp, ty_def)?;
+    debug!("Processing proto enum: {}", enum_type.name);
     if enum_type.name.ends_with("OneofCase") {
         oneof_cases
             .entry(ty_def.declaringTypeIndex)
@@ -309,6 +319,7 @@ fn process_message<'a>(
     oneof_cases: &mut HashMap<TypeIndex, Vec<ProtoEnum>>,
 ) -> Result<()> {
     let message_name = il2cpp.metadata.get_string_by_index(ty_def.nameIndex);
+    debug!("Processing proto message: {message_name}");
     let mut new_message = ProtoMessage::create(message_name, ty_def.byvalTypeIndex);
 
     // Build oneof mapping if oneof enums exist.
@@ -467,6 +478,7 @@ fn process_nested_types<'a>(
     il2cpp: &'a Il2Cpp<'a>,
     nested_types_map: &mut HashMap<TypeIndex, Vec<ProtoType>>,
 ) -> Result<()> {
+    debug!("Merge nested types...");
     let nested_type_indexes: Vec<TypeIndex> = nested_types_map.keys().copied().collect();
     for ty_idx in nested_type_indexes {
         let first_parent_ty = &il2cpp.types[ty_idx as usize];
@@ -530,6 +542,7 @@ fn integrate_nested_types_into_packages(
     schema: &mut ProtoSchema,
     nested_types_map: &mut HashMap<TypeIndex, Vec<ProtoType>>,
 ) {
+    debug!("Integrate nested types into packages...");
     for namespace in schema.packages.values_mut() {
         for message in namespace.messages_mut() {
             if let Some(nested_types) = nested_types_map.remove(&message.type_index) {

@@ -18,7 +18,7 @@ aes = "0.8.4"
 ctr = "0.9.2"
 
 # --- Command-line Parsing ---
-clap = { version = "4.5.31", features = ["derive"] }
+clap = { version = "4.5.32", features = ["derive"] }
 
 # --- Formatting and Compile-Time Constants ---
 const_format = { version = "0.2.34", features = ["fmt"] }
@@ -28,17 +28,17 @@ paste = "1.0.15"
 cursive = { version = "0.21.1", features = ["builder", "markdown"] }
 cursive-aligned-view = "0.7.0"
 cursive-extras = "0.13.1"
-rfd = "0.15.2"
+rfd = "0.15.3"
 
 # --- Error Handling & Logging ---
-anyhow = { version = "1.0.96", features = ["backtrace"] }
+anyhow = { version = "1.0.97", features = ["backtrace"] }
 log = { version = "0.4.26", features = ["kv", "std", "serde"] }
 
 # --- Filesystem Utilities ---
 directories = "6.0.0"
 
 # --- Binary and Executable Utilities ---
-foldhash = "0.1.4"
+foldhash = "0.1.5"
 
 # --- Binary Parsing ---
 goblin = { version = "0.9.3", default-features = false, features = ["elf64", "elf32", "endian_fd", "std"] }

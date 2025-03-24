@@ -2,12 +2,14 @@
 
 A command-line or text-based user interface (TUI) multi-tool designed for interacting with PTCGP files, specifically targeting APKs, XAPKs, IL2CPP binaries, and metadata files.
 
+The primary purpose of this tool is to facilitate learning about Unity and reverse engineering techniques. Written entirely in Rust, the codebase emphasizes clarity and thorough documentation, with extensive comments. This approach aims to educate users on how specific processes work, enabling them to better understand both Unity internals and reverse engineering practices. Users are explicitly advised to refrain from using this tool for any illegal or unethical purposes.
+
 ## Features
 
 - **Extract Protobuf Definitions**: Extract protobuf definitions from APK, XAPK, or IL2CPP metadata files.
 - **Patch IL2CPP**: Patch IL2CPP binaries to remove modification detection by updating code hashes. Not fully tested.
 
-<video src="docs/ptcgp_tool_demo.mp4"></video>
+<video src="https://github.com/user-attachments/assets/62cdba5b-3ef7-47c4-9069-e10f5fbc65cd" width=480></video>
 
 ## Installation
 
@@ -18,7 +20,7 @@ A command-line or text-based user interface (TUI) multi-tool designed for intera
 ### Building from Source
 
 ```bash
-git clone https://github.com/yourusername/ptcgp_tool.git
+git clone https://github.com/UnknownCollections/ptcgp_tool.git
 cd ptcgp_tool
 cargo build --release
 ```
@@ -87,7 +89,7 @@ Use `--help` to display detailed command options:
 
 ## Contributing
 
-Contributions are welcome! Please open issues and pull requests according to the project's guidelines.
+Contributions are welcome!
 
 ## License
 

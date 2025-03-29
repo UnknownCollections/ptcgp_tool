@@ -149,7 +149,7 @@ fn extract_reg_value(instructions: &[u32], start_idx: usize, reg: Register) -> O
                 let base = match mov_inst {
                     // For register-to-register MOV, treat it as setting the register to zero only if the source is XZR.
                     Mov::Register(mov) => {
-                        if mov.rm == Register::XZR {
+                        if mov.rm == Register::Xzr {
                             0
                         } else {
                             return None;
@@ -218,7 +218,7 @@ where
         .par_iter()
         .enumerate()
         .fold(
-            || IntSet::default(),
+            IntSet::default,
             |mut local_set, (i, &inst)| {
                 // Check if the instruction is a MADD.
                 if let Some(madd) = parse_madd(inst) {
@@ -237,7 +237,7 @@ where
             },
         )
         .reduce(
-            || IntSet::default(),
+            IntSet::default,
             |mut a, b| {
                 a.extend(b);
                 a

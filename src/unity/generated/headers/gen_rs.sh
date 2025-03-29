@@ -11,8 +11,11 @@ bindgenArgs=(
   "--ignore-functions"
   "--no-prepend-enum-name"
   "--use-array-pointers-in-arguments"
-  "--raw-line" "#![allow(unused_qualifications)]"
-  "--raw-line" "#![allow(unsafe_op_in_unsafe_fn)]"
+  "--raw-line", "#![allow(unused_qualifications)]",
+  "--raw-line", "#![allow(unsafe_op_in_unsafe_fn)]"
+  "--raw-line", "#![allow(clippy::useless_transmute)]"
+  "--raw-line", "#![allow(clippy::too_many_arguments)]"
+  "--raw-line", "#![allow(clippy::ptr_offset_with_cast)]"
 )
 
 for header in *.h; do

@@ -46,7 +46,7 @@ pub enum Register {
     X28,
     X29, // FP
     X30, // LR
-    XZR, // Zero Register (or SP in some contexts)
+    Xzr, // Zero Register (or SP in some contexts)
 }
 
 impl TryFrom<u8> for Register {
@@ -90,7 +90,7 @@ impl TryFrom<u8> for Register {
             28 => Ok(Register::X28),
             29 => Ok(Register::X29),
             30 => Ok(Register::X30),
-            31 => Ok(Register::XZR),
+            31 => Ok(Register::Xzr),
             _ => Err(()),
         }
     }
@@ -107,7 +107,7 @@ pub enum ShiftAmount {
 
 impl ShiftAmount {
     /// Returns the 2-bit encoding (0–3) corresponding to the half-word field.
-    pub fn to_u8(&self) -> u8 {
+    pub fn to_u8(self) -> u8 {
         match self {
             ShiftAmount::Lsl0 => 0,
             ShiftAmount::Lsl16 => 1,
@@ -117,7 +117,7 @@ impl ShiftAmount {
     }
 
     /// Computes the actual shift amount in bits by multiplying the encoded value by 16.
-    pub fn to_shift_bits(&self) -> u8 {
+    pub fn to_shift_bits(self) -> u8 {
         self.to_u8() * 16
     }
 }

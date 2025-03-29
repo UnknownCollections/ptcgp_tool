@@ -208,7 +208,7 @@ impl<'a> ReadOnly<&'a Il2CppType> {
             },
             _ => {
                 // Use a predefined mapping for basic types. If not found, label as unknown.
-                if let Some(ty_str) = TYPE_MAP.get(&ty) {
+                if let Some(ty_str) = TYPE_MAP.get(&(ty as i32)) {
                     Ok(ComplexType::Simple {
                         module: None,
                         namespace: None,

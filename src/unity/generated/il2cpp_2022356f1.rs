@@ -815,6 +815,7 @@ pub mod CIl2Cpp {
         pub nameIndex: CIl2Cpp::StringIndex,
         pub declaringType: CIl2Cpp::TypeDefinitionIndex,
         pub returnType: CIl2Cpp::TypeIndex,
+        pub returnParameterToken: u32,
         pub parameterStart: CIl2Cpp::ParameterIndex,
         pub genericContainerIndex: CIl2Cpp::GenericContainerIndex,
         pub token: u32,

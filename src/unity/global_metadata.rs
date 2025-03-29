@@ -8,6 +8,7 @@ use crate::unity::generated::CIl2Cpp::{
     Il2CppParameterDefaultValue, Il2CppParameterDefinition, Il2CppPropertyDefinition,
     Il2CppTypeDefinition, StringIndex,
 };
+use crate::unity::generated::SUPPORTED_GLOBAL_METADATA_VERSION;
 use anyhow::{bail, Result};
 use memchr::memchr;
 use nohash_hasher::IntMap;
@@ -163,7 +164,6 @@ pub struct Metadata {
 }
 
 const GLOBAL_METADATA_MAGIC: i32 = -89056337;
-const SUPPORTED_GLOBAL_METADATA_VERSION: i32 = 29;
 
 impl Metadata {
     /// Loads the metadata from a reader by parsing its header and subsequent data segments.

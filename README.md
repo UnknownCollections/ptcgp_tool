@@ -11,6 +11,13 @@ The primary purpose of this tool is to facilitate learning about Unity and rever
 
 <video src="https://github.com/user-attachments/assets/62cdba5b-3ef7-47c4-9069-e10f5fbc65cd" width=480></video>
 
+## Releases
+
+The game has changed Unity versions over time. There are build flags to determine which Unity version to support. The releases page has all versions build. The default version supports the latest Unity version.
+
+- APK Version 1.1.2 and before is Unity version `2022322f1`
+- APK Version 1.2.0 is Unity version `2022356f1`
+
 ## Installation
 
 ### Prerequisites
@@ -23,6 +30,11 @@ The primary purpose of this tool is to facilitate learning about Unity and rever
 git clone https://github.com/UnknownCollections/ptcgp_tool.git
 cd ptcgp_tool
 cargo build --release
+```
+
+Optionally, select a specific unity version to support:
+```bash
+cargo build --release --no-default-features --features 2022322f1
 ```
 
 ### Running

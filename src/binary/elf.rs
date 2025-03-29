@@ -1,3 +1,4 @@
+use crate::binary::arm64::SIZEOF_ARM64_INSTRUCTION;
 use crate::binary::search::find_pattern;
 use anyhow::{anyhow, bail, Result};
 use goblin::elf32::program_header::{PF_W, PF_X, PT_LOAD};
@@ -27,6 +28,8 @@ pub struct Elf<'a> {
     pub relocations: RelocMap,
     // Maps section names to their corresponding file data range.
     pub sections: HashMap<String, Range<usize>>,
+    // Maps executable segments to instruction size chunks
+    pub instructions: HashMap<String, Vec<u32>>,
 }
 
 impl<'a> Elf<'a> {
@@ -51,9 +54,11 @@ impl<'a> Elf<'a> {
         debug!("Applying ELF dynamic relocations...");
         let (data, relocations) = Self::apply_dynamic_relocations(&elf, original_data.clone())?;
 
-        // Build a mapping from section names to their file offsets.
         debug!("Building ELF section mapping...");
         let sections = Self::get_section_slices(&elf);
+
+        debug!("Building ELF section instructions...");
+        let instructions = Self::get_instruction_chunks(&elf, &data);
 
         // SAFETY: We transmute the lifetime of 'elf' to '`a'
         // because `original_data` will remain owned by this struct and will not be moved.
@@ -65,6 +70,7 @@ impl<'a> Elf<'a> {
             original_data,
             relocations,
             sections,
+            instructions,
         })
     }
 
@@ -152,6 +158,61 @@ impl<'a> Elf<'a> {
                 })
             })
             .collect()
+    }
+
+    /// Extracts instruction chunks from executable sections of an ELF file.
+    ///
+    /// This function iterates over the ELF file's section headers and processes only those marked as executable.
+    /// For each executable section, it retrieves the section name from the ELF's section header string table and then
+    /// extracts the corresponding bytes from the provided data slice. The section's data is split into fixed-size
+    /// chunks (each representing an ARM64 instruction), converted from little-endian byte order into a `u32`,
+    /// and collected into a vector. The final result is a `HashMap` mapping section names to their instruction vectors.
+    ///
+    /// # Arguments
+    ///
+    /// * `elf` - A reference to the parsed ELF file structure (from the `goblin` crate).
+    /// * `data` - A byte slice representing the complete binary content of the ELF file.
+    ///
+    /// # Returns
+    ///
+    /// A `HashMap` where each key is a section name (as a `String`) and the corresponding value is a vector of `u32`
+    /// instructions extracted from that section.
+    ///
+    /// # Note
+    ///
+    /// * Only executable sections are processed.
+    /// * Sections whose data range falls outside the bounds of the provided `data` slice are skipped.
+    fn get_instruction_chunks(elf: &goblin::elf::Elf, data: &[u8]) -> HashMap<String, Vec<u32>> {
+        let mut instructions = HashMap::new();
+
+        // Iterate over all section headers in the ELF file.
+        for section_hdr in &elf.section_headers {
+            // Process only sections that are marked as executable.
+            if section_hdr.is_executable() {
+                // Retrieve the section's name from the ELF's section header string table.
+                if let Some(name) = elf.shdr_strtab.get_at(section_hdr.sh_name) {
+                    // Determine the start offset and size of the section within the binary data.
+                    let start = section_hdr.sh_offset as usize;
+                    let size = section_hdr.sh_size as usize;
+
+                    // Ensure that the section's data lies within the bounds of the provided byte slice.
+                    if start + size <= data.len() {
+                        let section_data = &data[start..start + size];
+                        let mut insn_vec = Vec::new();
+
+                        // Divide the section data into fixed-size chunks (one for each ARM64 instruction).
+                        // `chunks_exact` processes only complete chunks of SIZEOF_ARM64_INSTRUCTION bytes.
+                        for chunk in section_data.chunks_exact(SIZEOF_ARM64_INSTRUCTION) {
+                            let insn = u32::from_le_bytes(chunk.try_into().unwrap());
+                            insn_vec.push(insn);
+                        }
+                        // Map the section name to its corresponding vector of instructions.
+                        instructions.insert(name.to_string(), insn_vec);
+                    }
+                }
+            }
+        }
+        instructions
     }
 
     /// Converts a virtual address (VA) into a file offset using the program headers.

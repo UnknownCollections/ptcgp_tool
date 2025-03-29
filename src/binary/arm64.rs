@@ -6,7 +6,6 @@ pub const SIZEOF_ARM64_INSTRUCTION: usize = 4;
 // The machine code bytes for the ARM64 `RET` instruction.
 pub const RET_INSTRUCTION_BYTES: [u8; SIZEOF_ARM64_INSTRUCTION] = [0xC0, 0x03, 0x5F, 0xD6];
 
-
 /// Represents an ARM64 general-purpose register.
 ///
 /// # Variants
@@ -508,6 +507,201 @@ pub fn parse_movn(inst: u32) -> Option<Movn> {
         opc,
         hw,
         imm16,
+        rd,
+    })
+}
+
+/// Represents a 32-bit BL (branch with link) instruction in ARM64.
+///
+/// A BL instruction has:
+/// - Bits 31-26 (op): 100101
+/// - Bits 25-0: imm26
+///
+/// The effective 64-bit branch offset is obtained by:
+///     offset = SignExtend(imm26 << 2, 64)
+///
+/// Operation:
+///     X[30] = PC + 4;
+///     BranchTo(PC + offset, BranchType_DIRCALL);
+#[derive(Debug)]
+pub struct Bl {
+    /// The raw 26-bit immediate field (after sign-extension to 32 bits).
+    pub imm26: i32,
+    /// The computed 64-bit offset in bytes (i.e. imm26 * 4).
+    pub offset: i64,
+}
+
+/// Attempts to parse a 32-bit instruction as a BL (branch with link) instruction.
+///
+/// # Parameters
+/// - `inst`: A 32-bit unsigned integer representing the encoded instruction.
+///
+/// # Returns
+/// - `Some(Bl)` if the instruction matches the BL encoding.
+/// - `None` otherwise.
+pub fn parse_bl(inst: u32) -> Option<Bl> {
+    // Check if bits 31-26 match 100101 (binary), which is 0x25.
+    if ((inst >> 26) & 0x3F) != 0b100101 {
+        return None;
+    }
+    // Extract the 26-bit immediate (bits 25-0).
+    let imm26 = (inst & 0x03FF_FFFF) as i32;
+    // Sign-extend the 26-bit immediate.
+    // We shift left 6 (i.e. 32 - 26) and then arithmetic right shift by 6.
+    let imm26_signed = (imm26 << 6) >> 6;
+    // Multiply by 4 (shift left by 2) to compute the byte offset.
+    let offset = (imm26_signed as i64) << 2;
+    Some(Bl {
+        imm26: imm26_signed,
+        offset,
+    })
+}
+
+/// Represents a 64-bit ADRP instruction in ARM64.
+///
+/// ADRP computes a PC-relative address to a 4KB page by adding a signed
+/// immediate (shifted left by 12 bits) to the current PC (with the lower
+/// 12 bits cleared). Its encoding is:
+///
+///   Bit 31:       1
+///   Bits 30-29:   immlo (2 bits)
+///   Bits 28-24:   fixed 0b10000
+///   Bits 23-5:    immhi (19 bits)
+///   Bits 4-0:     destination register (Rd)
+#[derive(Debug)]
+pub struct Adrp {
+    /// 2-bit immediate (low part).
+    pub immlo: u8,
+    /// 19-bit immediate (high part).
+    pub immhi: u32,
+    /// Destination register.
+    pub rd: Register,
+}
+
+impl Adrp {
+    /// Computes the full 64-bit immediate value.
+    ///
+    /// The immediate is calculated by concatenating `immhi` and `immlo`,
+    /// then appending 12 zeros. The result is sign-extended from 33 bits to 64 bits.
+    ///
+    /// # Returns
+    ///
+    /// A signed 64-bit integer representing the page offset to be added to the
+    /// base PC.
+    pub fn compute_imm(&self) -> i64 {
+        // Combine immhi and immlo into a 21-bit immediate.
+        let imm21 = ((self.immhi as i64) << 2) | (self.immlo as i64);
+        // Shift left by 12 bits to form a 33-bit value.
+        let imm33 = imm21 << 12;
+        // Sign-extend the 33-bit value to 64 bits.
+        let shift = 64 - 33;
+        (imm33 << shift) >> shift
+    }
+}
+
+/// Attempts to parse a 32-bit instruction as an ADRP instruction.
+///
+/// # Parameters
+/// - `inst`: A 32-bit unsigned integer representing the encoded instruction.
+///
+/// # Returns
+/// - `Some(Adrp)` if the instruction matches the ADRP encoding.
+/// - `None` otherwise.
+pub fn parse_adrp(inst: u32) -> Option<Adrp> {
+    // Check that bit 31 is 1.
+    if ((inst >> 31) & 0x1) != 1 {
+        return None;
+    }
+    // Check that bits 28-24 equal 0b10000.
+    if ((inst >> 24) & 0x1F) != 0b10000 {
+        return None;
+    }
+    // Extract immlo from bits 30-29.
+    let immlo = ((inst >> 29) & 0x3) as u8;
+    // Extract immhi from bits 23-5 (19 bits).
+    let immhi = (inst >> 5) & 0x7FFFF;
+    // Extract the destination register from bits 4-0.
+    let rd_val = (inst & 0x1F) as u8;
+    let rd = Register::try_from(rd_val).ok()?;
+    Some(Adrp { immlo, immhi, rd })
+}
+
+/// Represents an ADD (immediate) instruction in ARM64.
+///
+/// This instruction adds a register value and an optionally shifted immediate value,
+/// writing the result to the destination register. The instruction encoding is as follows:
+///
+/// - Bit 31: sf (size flag; 1 for 64-bit, 0 for 32-bit)
+/// - Bits 30-23: fixed opcode (should be 0x22, corresponding to binary 00100010)
+/// - Bit 22: sh (shift flag; if 1 then the immediate is left-shifted by 12)
+/// - Bits 21-10: imm12 (12-bit immediate)
+/// - Bits 19-5: Rn (source register)
+/// - Bits 4-0: Rd (destination register)
+///
+/// Alias Note: When `sh == 0`, `imm12 == 0` and either register field equals 31 (the stack pointer),
+/// this instruction is usually aliased as MOV (to/from SP).
+#[derive(Debug)]
+pub struct AddImmediate {
+    /// Size flag; should be 1 for a 64-bit operation, 0 for 32-bit.
+    pub sf: u8,
+    /// Shift flag; if 1 then the immediate is left shifted by 12.
+    pub sh: u8,
+    /// 12-bit immediate value.
+    pub imm12: u16,
+    /// Source register.
+    pub rn: Register,
+    /// Destination register.
+    pub rd: Register,
+}
+
+impl AddImmediate {
+    /// Computes the effective immediate value.
+    ///
+    /// If `sh` is 1, then the immediate is shifted left by 12 bits;
+    /// otherwise it is used as is. The value is then zero-extended to the
+    /// operand size (32 or 64 bits) as determined by `sf`.
+    pub fn immediate(&self) -> u64 {
+        if self.sh == 1 {
+            (self.imm12 as u64) << 12
+        } else {
+            self.imm12 as u64
+        }
+    }
+}
+
+/// Attempts to parse a 32-bit instruction as an ADD (immediate) instruction.
+///
+/// # Parameters
+/// - `inst`: A 32-bit unsigned integer representing the encoded instruction.
+///
+/// # Returns
+/// - `Some(AddImmediate)` if the instruction matches the ADD immediate encoding.
+/// - `None` otherwise.
+pub fn parse_add_immediate(inst: u32) -> Option<AddImmediate> {
+    // Extract the size flag (bit 31)
+    let sf = ((inst >> 31) & 0x1) as u8;
+    // Extract the opcode field from bits 30-23.
+    // For ADD immediate, these bits should equal 0x22 (binary 00100010).
+    let op = ((inst >> 23) & 0xFF) as u8;
+    if op != 0x22 {
+        return None;
+    }
+    // Extract the shift bit (bit 22)
+    let sh = ((inst >> 22) & 0x1) as u8;
+    // Extract the 12-bit immediate (bits 21-10)
+    let imm12 = ((inst >> 10) & 0xFFF) as u16;
+    // Extract the source register (Rn) from bits 19-5.
+    let rn_val = ((inst >> 5) & 0x1F) as u8;
+    let rn = Register::try_from(rn_val).ok()?;
+    // Extract the destination register (Rd) from bits 4-0.
+    let rd_val = (inst & 0x1F) as u8;
+    let rd = Register::try_from(rd_val).ok()?;
+
+    Some(AddImmediate {
+        sf,
+        sh,
+        imm12,
+        rn,
         rd,
     })
 }

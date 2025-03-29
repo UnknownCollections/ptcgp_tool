@@ -1,6 +1,8 @@
-use crate::binary::arm64::{parse_movk, parse_movz, Register, ShiftAmount};
+use crate::binary::arm64::{
+    parse_add_immediate, parse_adrp, parse_bl, parse_movk, parse_movz, Register,
+    ShiftAmount, SIZEOF_ARM64_INSTRUCTION,
+};
 use crate::binary::elf::{Elf, POINTER_SIZE};
-use crate::binary::hex_pattern::HexPattern;
 use crate::unity::generated::CIl2Cpp::{
     Il2CppCodeGenModule, Il2CppCodeRegistration, Il2CppMetadataRegistration, Il2CppType,
     Il2CppTypeEnum, IL2CPP_TYPE_ENUM,
@@ -42,22 +44,16 @@ impl<'a> Il2Cpp<'a> {
     ///
     /// # Arguments
     ///
-    /// * `il2cpp_data` - A vector of bytes representing the IL2CPP ELF binary.
+    /// * `elf` - An instance of a parsed IL2CPP ELF binary.
     /// * `global_metadata_data` - A vector of bytes representing the global metadata.
     ///
     /// # Errors
     ///
     /// Returns an error if the metadata version is unsupported or if parsing fails.
-    pub fn load_from_vec(il2cpp_data: Vec<u8>, global_metadata_data: Vec<u8>) -> Result<Self> {
+    pub fn load_from_vec(elf: Elf<'a>, global_metadata_data: Vec<u8>) -> Result<Self> {
         debug!("Loading IL2CPP from ELF and metadata...");
         let reader = Cursor::new(global_metadata_data);
         let metadata = Metadata::load_from_reader(reader)?;
-
-        if metadata.header.version != 29 {
-            bail!("Unsupported global metadata version");
-        }
-
-        let elf = Elf::new(il2cpp_data)?;
 
         let code_registration = Self::find_code_registration(&elf, &metadata)?;
         let metadata_registration = Self::find_metadata_registration(&elf, &metadata)?;
@@ -93,7 +89,7 @@ impl<'a> Il2Cpp<'a> {
         })
     }
 
-    /// Extracts the metadata key's xor key from ARM64 instructions in the provided data slice.
+    /// Extracts the metadata key's xor key from ARM64 instructions in the provided elf file data.
     ///
     /// This function scans through the provided data and looks for a sequence of instructions
     /// that match a specific pattern. When found, the immediate values from these instructions
@@ -101,16 +97,19 @@ impl<'a> Il2Cpp<'a> {
     ///
     /// # Arguments
     ///
-    /// * `data` - A slice of bytes containing ARM64 instructions.
+    /// * `elf` - An instance of the Elf binary class
     ///
     /// # Returns
     ///
-    /// Returns `Some(u64)` containing the metadata key if the pattern is found, or `None` otherwise.
-    pub fn extract_metadata_key_xor(data: &[u8]) -> Option<u64> {
+    /// Returns `Some((usize, u64))` containing the offset and metadata key if the pattern is found, or `None` otherwise.
+    pub fn extract_metadata_key_xor(elf: &Elf) -> Option<(usize, u64)> {
         debug!("Extracting global metadata key xor data from IL2CPP...");
 
+        let text_section_range = elf.sections.get(".text")?;
+        let text_section_data = &elf.data[text_section_range.start..text_section_range.end];
+
         // ARM64 instructions are 4 bytes in little-endian order.
-        let instructions: Vec<u32> = data
+        let instructions: Vec<u32> = text_section_data
             .chunks_exact(4)
             .map(|chunk| u32::from_le_bytes(chunk.try_into().unwrap()))
             .collect();
@@ -119,7 +118,7 @@ impl<'a> Il2Cpp<'a> {
         debug!(progress = 0, max = total; "");
 
         // Look for five consecutive instructions that meet the required criteria.
-        for window in instructions.windows(5) {
+        for (i, window) in instructions.windows(5).enumerate() {
             debug!(progress_tick = 1; "");
             let inst1 = match parse_movz(window[0]) {
                 Some(inst) => inst,
@@ -154,34 +153,93 @@ impl<'a> Il2Cpp<'a> {
                 | ((inst2.imm16 as u64) << 16)
                 | inst1.imm16 as u64;
 
-            return Some(combined);
+            // Calculate the offset in bytes (each instruction is 4 bytes).
+            let offset = i * SIZEOF_ARM64_INSTRUCTION;
+            return Some((offset, combined));
         }
         None
     }
 
-    /// Extracts a 16-byte metadata key from the provided data using a predefined hex pattern.
-    ///
-    /// This function searches for a hex pattern corresponding to the metadata key within the data.
-    /// If the pattern is found, the function returns the 16 bytes immediately following the pattern.
-    ///
-    /// # Arguments
-    ///
-    /// * `data` - A slice of bytes to search within.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Some([u8; 16])` if the key is found, or `None` otherwise.
-    pub fn extract_metadata_key(data: &[u8]) -> Option<[u8; 16]> {
+    /**
+     * Extracts a 16-byte metadata key from the provided ELF binary data using a predefined hex pattern.
+     *
+     * This function scans the .text section of the ELF for a specific pattern corresponding to a key XOR instruction.
+     * Starting from the given key XOR offset, it searches for a BL (branch with link) instruction to locate a code region
+     * that contains an ADRP instruction followed immediately by an ADD immediate instruction using the same destination register.
+     * It then computes the key's virtual address by combining the ADRP’s page base with its immediate offset and the ADD’s immediate value,
+     * converts that address to a file offset, and finally extracts the 16-byte key from the ELF data.
+     *
+     * # Arguments
+     *
+     * * `elf` - A reference to an `Elf` structure representing the ELF binary.
+     * * `key_xor_offset` - The offset within the .text section pointing to the key XOR instruction.
+     *
+     * # Returns
+     *
+     * * `Some([u8; 16])` if the key is successfully extracted.
+     * * `None` if the key is not found or if any computation fails.
+     */
+    pub fn extract_metadata_key(elf: &Elf, key_xor_offset: usize) -> Option<[u8; 16]> {
         debug!("Extracting global metadata encryption keys from IL2CPP...");
-        const KEY_XOR_PATTERN: HexPattern = HexPattern::new(
-            "FF FF FF FF ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? 02 00 00 00 00 00 00 00 FF FF FF FF FF FF FF FF",
-        );
-        if let Some(idx) = KEY_XOR_PATTERN.find(data)
-        {
-            data[idx + 4..idx + 4 + 16].try_into().ok()
-        } else {
-            None
+
+        // Retrieve the file offset range of the .text section and its corresponding instruction stream.
+        let text_section_range = elf.sections.get(".text")?;
+        let text_instructions = elf.instructions.get(".text")?;
+
+        // Convert the key_xor_offset from a byte offset to an instruction index by dividing by the instruction size.
+        let key_xor_inst_offset = key_xor_offset / SIZEOF_ARM64_INSTRUCTION;
+
+        // Starting from the key XOR instruction index, iterate over instructions to locate a BL (branch with link) instruction.
+        // The BL instruction contains a relative offset that, when combined with the current index,
+        // gives us an adjusted instruction offset used to pinpoint the following ADRP/ADD instruction pair.
+        let bl_inst_offset = text_instructions[key_xor_inst_offset..]
+            .iter()
+            .enumerate()
+            .find_map(|(offset, &inst)| {
+                parse_bl(inst).map(|bl| {
+                    // Calculate the absolute offset by summing:
+                    // - The offset within the slice,
+                    // - The starting key XOR instruction index,
+                    // - The BL instruction's embedded relative offset (converted to instruction units).
+                    offset as i64
+                        + key_xor_inst_offset as i64
+                        + (bl.offset / SIZEOF_ARM64_INSTRUCTION as i64)
+                })
+            })? as usize;
+
+        // Iterate over adjacent instruction pairs starting from the BL instruction offset.
+        // We are looking for an ADRP instruction immediately followed by an ADD immediate instruction.
+        // The ADD must use the destination register specified by the ADRP instruction.
+        for (i, window) in text_instructions[bl_inst_offset..].windows(2).enumerate() {
+            if let (Some(adrp), Some(add)) = (parse_adrp(window[0]), parse_add_immediate(window[1]))
+            {
+                if add.rn == adrp.rd {
+                    // Calculate the absolute index of the ADRP instruction within the .text section.
+                    let adrp_index = bl_inst_offset + i;
+                    // Determine the file offset for the ADRP instruction.
+                    let adrp_address =
+                        text_section_range.start + adrp_index * SIZEOF_ARM64_INSTRUCTION;
+                    // Convert the file offset to a virtual address.
+                    let adrp_address_va = elf.file_offset_to_va(adrp_address as u64)?;
+                    // Clear the lower 12 bits to obtain the ADRP page base, since ADRP instructions work on page granularity.
+                    let page_base = adrp_address_va & !0xfff;
+                    // Compute the final virtual address for the key by adding the ADRP and ADD immediate offsets to the page base.
+                    let key_offset_va =
+                        ((page_base as i64) + adrp.compute_imm() + add.immediate() as i64) as u64;
+                    // Convert the computed virtual address back to a file offset.
+                    let key_offset = elf.va_to_file_offset(key_offset_va)?;
+
+                    // Extract and return a 16-byte slice from the ELF data as the metadata key.
+                    return elf
+                        .data
+                        .get(key_offset as usize..key_offset as usize + 16)
+                        .and_then(|slice| slice.try_into().ok());
+                }
+            }
         }
+
+        // If no valid ADRP/ADD pair is found, return None.
+        None
     }
 
     /// Locates the `Il2CppCodeRegistration` structure in the ELF binary.
@@ -501,7 +559,7 @@ impl<'a> Il2Cpp<'a> {
         data: &[u8],
         offset: usize,
     ) -> (Il2CppTypeEnum, Option<&'a ReadOnly<&'a Il2CppType>>) {
-        let ty = self.metadata.read_u8(data, offset) as i32;
+        let ty = self.metadata.read_u8(data, offset) as Il2CppTypeEnum;
         if ty == IL2CPP_TYPE_ENUM {
             let ty_idx = self.metadata.read_compressed_i32(data, offset + 1);
             let ty = &self.types[ty_idx as usize];

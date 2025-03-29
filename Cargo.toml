@@ -61,3 +61,8 @@ serde_json = "1.0.140"
 snmalloc-rs = { version = "0.3.8", features = ["native-cpu"] }
 strum = { version = "0.27.1", features = ["derive"] }
 zip = "2.2.3"
+
+[features]
+default = ["2022356f1"]
+2022322f1 = []
+2022356f1 = []

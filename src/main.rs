@@ -14,6 +14,7 @@ pub(crate) mod proto;
 pub(crate) mod unity;
 pub(crate) mod utils;
 
+use crate::unity::generated::SUPPORTED_VERSION_NAME;
 use anyhow::Result;
 use const_format::formatcp;
 
@@ -21,7 +22,11 @@ use const_format::formatcp;
 ///
 /// This constant holds the application title and includes the build version
 /// extracted from the environment variable `VERSION`.
-pub const TITLE: &str = formatcp!("Pokemon TCG Pocket Tool - v{}", env!("VERSION"));
+pub const TITLE: &str = formatcp!(
+    "Pokemon TCG Pocket Tool - v{} ({})",
+    env!("VERSION"),
+    SUPPORTED_VERSION_NAME
+);
 
 /// Main entry point for the CLI application.
 ///

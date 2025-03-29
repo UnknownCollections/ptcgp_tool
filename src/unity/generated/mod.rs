@@ -32,8 +32,12 @@ mod il2cpp_2022356f1;
 pub use il2cpp_2022322f1::*;
 #[cfg(feature = "2022322f1")]
 pub const SUPPORTED_GLOBAL_METADATA_VERSION: i32 = 29;
+#[cfg(feature = "2022322f1")]
+pub const SUPPORTED_VERSION_NAME: &str = "2022.3.22f1";
 
 #[cfg(feature = "2022356f1")]
 pub use il2cpp_2022356f1::*;
 #[cfg(feature = "2022356f1")]
 pub const SUPPORTED_GLOBAL_METADATA_VERSION: i32 = 31;
+#[cfg(feature = "2022356f1")]
+pub const SUPPORTED_VERSION_NAME: &str = "2022.3.56f1";
